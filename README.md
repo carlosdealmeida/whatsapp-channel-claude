@@ -6,6 +6,8 @@ Um canal WhatsApp para o [Claude Code](https://docs.anthropic.com/en/docs/claude
 
 ## O que são Channels do Claude Code?
 
+> **Requisitos:** Channels estão em [research preview](https://docs.anthropic.com/en/docs/claude-code/channels) e requerem **Claude Code v2.1.80 ou superior**. O relay de permissões requer **v2.1.81+**. É necessário login via claude.ai — autenticação por Console ou API key não é suportada.
+
 [Channels](https://docs.anthropic.com/en/docs/claude-code/channels) são uma funcionalidade experimental do Claude Code que permite que plataformas de mensagens externas (WhatsApp, Telegram, Slack, etc.) se comuniquem com uma sessão ativa do Claude Code via servidores MCP. Um channel atua como uma ponte: recebe mensagens de uma fonte externa, entrega-as ao Claude como notificações e fornece ferramentas para o Claude responder de volta.
 
 Quando você inicia o Claude Code com `--dangerously-load-development-channels server:<nome>`, ele carrega o servidor MCP do channel e habilita a comunicação bidirecional. As mensagens chegam como notificações `<channel>` que o Claude pode ler e responder usando as ferramentas do channel.
