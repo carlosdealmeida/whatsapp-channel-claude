@@ -1,0 +1,106 @@
+{
+  "name": "WhatsApp Channel for Claude Code",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-claude-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-receive",
+      "name": "Receive Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "whatsapp-claude-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $input.first().json.body || $input.first().json;\nconst event = payload.event || '';\nif (event !== 'messages.upsert') return [];\n\nconst data = payload.data || {};\nconst key = data.key || {};\nconst msg = data.message || {};\n\n// Ignore own messages\nif (key.fromMe) return [];\n\nconst sender = (key.remoteJid || '').replace('@s.whatsapp.net', '');\nconst messageId = key.id || '';\n\n// Extract content by type\nlet type = 'text';\nlet content = '';\nif (msg.conversation) { content = msg.conversation; }\nelse if (msg.extendedTextMessage) { content = msg.extendedTextMessage.text || ''; }\nelse if (msg.audioMessage) { type = 'audio'; content = '[audio]'; }\nelse if (msg.imageMessage) { type = 'image'; content = msg.imageMessage.caption || '[image]'; }\nelse if (msg.documentMessage) { type = 'document'; content = msg.documentMessage.fileName || '[document]'; }\n\n// Filter: must start with /claude OR be permission reply OR be audio/image reply\nconst claudePrefix = /^\\/claude\\b/i;\nconst permReply = /^\\s*(y|yes|n|no|sim|s)\\s+[a-km-z]{5}\\s*$/i;\nconst hasContext = msg.audioMessage?.contextInfo || msg.imageMessage?.contextInfo;\n\nif (type === 'text' && !claudePrefix.test(content.trim()) && !permReply.test(content)) {\n  return [];\n}\nif ((type === 'audio' || type === 'image') && !hasContext && !claudePrefix.test(content.trim())) {\n  return [];\n}\n\n// Strip /claude prefix\nlet project = 'default';\nif (claudePrefix.test(content.trim())) {\n  content = content.trim().replace(/^\\/claude\\s*/i, '');\n  // Project routing: first word after /claude can be a project name\n  // Add your project names here if needed\n}\n\n// Store in static data queue\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.queue) staticData.queue = {};\nif (!staticData.queue[project]) staticData.queue[project] = [];\n\nstaticData.queue[project].push({\n  sender, message_id: messageId, type, content,\n  raw: data, timestamp: Date.now()\n});\n\nreturn [{ json: { status: 'queued', sender, project } }];"
+      },
+      "id": "filter-extract",
+      "name": "Filter & Extract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok' }) }}",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "whatsapp-claude-poll",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-poll",
+      "name": "Poll Endpoint",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 520],
+      "webhookId": "whatsapp-claude-poll"
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $input.first().json.query || {};\nconst project = query.project || 'default';\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.queue) staticData.queue = {};\n\nconst messages = [];\nconst cutoff = Date.now() - 3600000; // 1h TTL\n\n// Drain project queue\nif (staticData.queue[project]) {\n  while (staticData.queue[project].length > 0) {\n    const msg = staticData.queue[project].shift();\n    if (msg.timestamp > cutoff) messages.push(msg);\n  }\n}\n\n// Also drain default queue if different project\nif (project !== 'default' && staticData.queue['default']) {\n  while (staticData.queue['default'].length > 0) {\n    const msg = staticData.queue['default'].shift();\n    if (msg.timestamp > cutoff) messages.push(msg);\n  }\n}\n\nreturn [{ json: { messages } }];"
+      },
+      "id": "drain-queue",
+      "name": "Drain Queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 520]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($input.first().json) }}",
+        "options": {}
+      },
+      "id": "respond-poll",
+      "name": "Respond Messages",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 520]
+    }
+  ],
+  "connections": {
+    "Receive Webhook": {
+      "main": [
+        [{ "node": "Filter & Extract", "type": "main", "index": 0 }]
+      ]
+    },
+    "Filter & Extract": {
+      "main": [
+        [{ "node": "Respond OK", "type": "main", "index": 0 }]
+      ]
+    },
+    "Poll Endpoint": {
+      "main": [
+        [{ "node": "Drain Queue", "type": "main", "index": 0 }]
+      ]
+    },
+    "Drain Queue": {
+      "main": [
+        [{ "node": "Respond Messages", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0
+}

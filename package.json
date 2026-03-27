@@ -1,0 +1,15 @@
+{
+  "name": "whatsapp-channel-claude",
+  "version": "1.0.0",
+  "description": "WhatsApp channel for Claude Code via Evolution API — pluggable message provider pattern",
+  "license": "MIT",
+  "type": "module",
+  "main": "server.ts",
+  "scripts": {
+    "start": "bun server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.25.1"
+  }
+}
