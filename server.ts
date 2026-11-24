@@ -23,13 +23,14 @@ import { homedir } from 'os'
 import { join } from 'path'
 
 import { loadChannelEnv, requireEnv } from './lib/env.ts'
-import { transcribeAudio, saveToInbox } from './lib/media.ts'
+import { transcribeAudio, saveToInbox, extFromMime } from './lib/media.ts'
 import {
   sendText,
   sendReply,
   downloadMedia,
 } from './lib/evolution.ts'
-import { startWebhookServer } from './lib/webhook-server.ts'
+import { startWebhookServer, TOKEN_HEADER } from './lib/webhook-server.ts'
+import { PERMISSION_REPLY_RE } from './lib/message-filter.ts'
 import type { EvolutionConfig, QueuedMessage, ProviderResponse } from './lib/types.ts'
 
 const CHANNEL_NAME = 'whatsapp'
@@ -44,16 +45,16 @@ const EVOLUTION_API_KEY = requireEnv('EVOLUTION_API_KEY', CHANNEL_NAME)
 const PROVIDER_MODE = process.env.PROVIDER_MODE ?? 'n8n'
 const POLL_INTERVAL = Number(process.env.WHATSAPP_POLL_INTERVAL_MS ?? 3000)
 const GROQ_API_KEY = process.env.GROQ_API_KEY ?? ''
-const PROJECT_NAME = process.env.WHATSAPP_PROJECT ?? 'default'
+const PROJECT_NAME = (process.env.WHATSAPP_PROJECT || 'default').toLowerCase()
+const WEBHOOK_PORT = Number(process.env.WHATSAPP_WEBHOOK_PORT ?? 9801)
+const WEBHOOK_HOST = process.env.WHATSAPP_WEBHOOK_HOST || '127.0.0.1'
+const WEBHOOK_SECRET = process.env.WHATSAPP_WEBHOOK_SECRET ?? ''
 
 const evoConfig: EvolutionConfig = {
   apiUrl: EVOLUTION_API_URL,
   instance: EVOLUTION_API_INSTANCE,
   apiKey: EVOLUTION_API_KEY,
 }
-
-// Permission-reply regex
-const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no|sim|s)\s+([a-km-z]{5})\s*$/i
 
 process.on('unhandledRejection', err => {
   process.stderr.write(`${CHANNEL_NAME}: unhandled rejection: ${err}\n`)
@@ -105,17 +106,36 @@ function assertAllowedChat(phone: string): void {
 let providerUrl: string
 
 if (PROVIDER_MODE === 'webhook') {
-  const srv = startWebhookServer(Number(process.env.WHATSAPP_WEBHOOK_PORT ?? 9801))
-  providerUrl = srv.url
+  try {
+    providerUrl = startWebhookServer({ port: WEBHOOK_PORT, hostname: WEBHOOK_HOST, secret: WEBHOOK_SECRET }).url
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+      // Another Claude Code session already hosts the webhook server on this
+      // port: poll it instead, so several projects can share one webhook.
+      providerUrl = `http://127.0.0.1:${WEBHOOK_PORT}`
+      process.stderr.write(`${CHANNEL_NAME}: port ${WEBHOOK_PORT} in use — polling the existing webhook server\n`)
+    } else {
+      process.stderr.write(`${CHANNEL_NAME}: ${err instanceof Error ? err.message : err}\n`)
+      process.exit(1)
+    }
+  }
 } else {
   // n8n or custom mode
   providerUrl = process.env.PROVIDER_URL ?? 'http://localhost:5678/webhook/whatsapp-claude-poll'
 }
 
+// Media from allowlisted senders that download_attachment may fetch.
+// Bounded so a long-running session does not grow without limit.
+const downloadableIds = new Set<string>()
+function rememberDownloadable(id: string): void {
+  downloadableIds.add(id)
+  if (downloadableIds.size > 500) downloadableIds.delete(downloadableIds.values().next().value!)
+}
+
 // --- MCP Server ---
 
 const mcp = new Server(
-  { name: CHANNEL_NAME, version: '1.0.0' },
+  { name: CHANNEL_NAME, version: '1.1.0' },
   {
     capabilities: {
       tools: {},
@@ -235,9 +255,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
       }
       case 'download_attachment': {
         const message_id = args.message_id as string
-        const bytes = await downloadMedia(evoConfig, message_id)
-        if (!bytes) throw new Error('failed to download media — message may have expired')
-        const path = saveToInbox(CHANNEL_NAME, bytes, '.bin')
+        if (!downloadableIds.has(message_id)) {
+          throw new Error('unknown message_id — only attachments delivered to this session can be downloaded')
+        }
+        const media = await downloadMedia(evoConfig, message_id)
+        if (!media) throw new Error('failed to download media — message may have expired')
+        const path = saveToInbox(CHANNEL_NAME, media.bytes, extFromMime(media.mimetype))
         return { content: [{ type: 'text', text: path }] }
       }
       default:
@@ -284,9 +307,10 @@ async function handleInbound(msg: QueuedMessage): Promise<void> {
   if (msg.type === 'audio') {
     if (GROQ_API_KEY) {
       try {
-        const audioBytes = await downloadMedia(evoConfig, msg.message_id)
-        if (audioBytes) {
-          const result = await transcribeAudio(audioBytes, GROQ_API_KEY, 'audio.ogg')
+        const audio = await downloadMedia(evoConfig, msg.message_id)
+        if (audio) {
+          const ext = extFromMime(audio.mimetype)
+          const result = await transcribeAudio(audio.bytes, GROQ_API_KEY, 'audio' + (ext === '.bin' ? '.ogg' : ext))
           content = result.text
           meta.source_type = 'audio'
           meta.audio_duration = String(result.duration)
@@ -298,6 +322,7 @@ async function handleInbound(msg: QueuedMessage): Promise<void> {
         content = '[audio — transcription failed]'
       }
     } else {
+      rememberDownloadable(msg.message_id)
       meta.attachment_message_id = msg.message_id
       meta.attachment_type = 'audio'
       content = '[audio — GROQ_API_KEY not configured, use download_attachment]'
@@ -307,9 +332,10 @@ async function handleInbound(msg: QueuedMessage): Promise<void> {
   // Image: download + save to inbox
   if (msg.type === 'image') {
     try {
-      const imageBytes = await downloadMedia(evoConfig, msg.message_id)
-      if (imageBytes) {
-        const path = saveToInbox(CHANNEL_NAME, imageBytes, '.jpg')
+      const image = await downloadMedia(evoConfig, msg.message_id)
+      if (image) {
+        const ext = extFromMime(image.mimetype)
+        const path = saveToInbox(CHANNEL_NAME, image.bytes, ext === '.bin' ? '.jpg' : ext)
         meta.image_path = path
       }
     } catch (err) {
@@ -319,6 +345,7 @@ async function handleInbound(msg: QueuedMessage): Promise<void> {
 
   // Document: mark for download
   if (msg.type === 'document') {
+    rememberDownloadable(msg.message_id)
     meta.attachment_message_id = msg.message_id
     meta.attachment_type = 'document'
   }
@@ -336,8 +363,11 @@ async function handleInbound(msg: QueuedMessage): Promise<void> {
 async function pollMessages(): Promise<void> {
   try {
     const res = await fetch(
-      `${providerUrl}/pending?project=${PROJECT_NAME}`,
-      { signal: AbortSignal.timeout(10_000) },
+      `${providerUrl}/pending?project=${encodeURIComponent(PROJECT_NAME)}`,
+      {
+        signal: AbortSignal.timeout(10_000),
+        headers: WEBHOOK_SECRET ? { [TOKEN_HEADER]: WEBHOOK_SECRET } : {},
+      },
     )
     if (!res.ok) return
 

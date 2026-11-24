@@ -7,7 +7,8 @@ import type { ExtractedMessage } from './types.ts'
 
 const CLAUDE_PREFIX = /^\/claude\b/i
 
-const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no|sim|s)\s+[a-km-z]{5}\s*$/i
+/** "yes abcde" / "no abcde" / "sim abcde" — group 1 is the answer, group 2 the request ID. */
+export const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no|sim|s)\s+([a-km-z]{5})\s*$/i
 
 /**
  * Returns true if the message should be forwarded to the Claude Code channel.
@@ -15,7 +16,7 @@ const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no|sim|s)\s+[a-km-z]{5}\s*$/i
  * Criteria:
  * - Text starting with /claude
  * - Permission reply (yes/no + 5-letter request ID)
- * - Audio or image that is a reply to a bot message (has contextInfo)
+ * - Audio or image sent as a reply (quotes an earlier message)
  * - Image with caption starting with /claude
  */
 export function isClaudeChannelMessage(message: ExtractedMessage): boolean {
@@ -31,13 +32,15 @@ export function isClaudeChannelMessage(message: ExtractedMessage): boolean {
     return true
   }
 
-  // Audio or image that is a reply to a bot message
+  // Audio or image sent as a reply to an earlier message.
+  // contextInfo alone is not enough: WhatsApp also sets it on forwarded media
+  // and on ephemeral-chat metadata, so require an actual quoted message.
   if (type === 'audio' || type === 'image') {
     const rawMsg = (raw.message ?? {}) as Record<string, unknown>
     const typeKey = type === 'audio' ? 'audioMessage' : 'imageMessage'
     const typeMsg = (rawMsg[typeKey] ?? {}) as Record<string, unknown>
-    const contextInfo = typeMsg.contextInfo
-    if (contextInfo) {
+    const contextInfo = (typeMsg.contextInfo ?? {}) as Record<string, unknown>
+    if (contextInfo.quotedMessage && !contextInfo.isForwarded) {
       return true
     }
 

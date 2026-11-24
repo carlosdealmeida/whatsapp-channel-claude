@@ -51,8 +51,10 @@ This project has specific security aspects you should be aware of:
 
 ### Webhook Security
 
-- In `webhook` mode, the embedded HTTP server listens on the configured port
-- Restrict access to the webhook endpoint using firewall rules or reverse proxy authentication
+- In `webhook` mode, the embedded HTTP server listens on `127.0.0.1` by default
+- Set `WHATSAPP_WEBHOOK_SECRET`: every request must then carry it (`x-webhook-token` header or `?token=`), compared in constant time
+- Listening on any other address (`WHATSAPP_WEBHOOK_HOST`) without a secret is refused at startup — otherwise anyone reaching the port could forge messages from an allowlisted number and approve tool permissions
+- Prefer HTTPS (a reverse proxy or a tunnel) when the webhook crosses a network, so the secret is not sent in clear text
 - In `n8n` mode, ensure your n8n instance is properly secured
 
 ### Prompt Injection
@@ -114,8 +116,10 @@ Use o [GitHub Security Advisories](https://github.com/carlosdealmeida/whatsapp-c
 
 ### Segurança do Webhook
 
-- No modo `webhook`, o servidor HTTP embutido escuta na porta configurada
-- Restrinja o acesso ao endpoint do webhook usando regras de firewall ou autenticação via proxy reverso
+- No modo `webhook`, o servidor HTTP embutido escuta em `127.0.0.1` por padrão
+- Defina `WHATSAPP_WEBHOOK_SECRET`: toda requisição passa a exigi-lo (header `x-webhook-token` ou `?token=`), com comparação em tempo constante
+- Escutar em qualquer outro endereço (`WHATSAPP_WEBHOOK_HOST`) sem segredo é recusado na inicialização — do contrário, quem alcançasse a porta poderia forjar mensagens de um número autorizado e aprovar permissões de ferramentas
+- Prefira HTTPS (proxy reverso ou túnel) quando o webhook atravessa uma rede, para o segredo não trafegar em texto puro
 - No modo `n8n`, garanta que sua instância n8n esteja devidamente protegida
 
 ### Prompt Injection
@@ -177,8 +181,10 @@ Usa [GitHub Security Advisories](https://github.com/carlosdealmeida/whatsapp-cha
 
 ### Seguridad del Webhook
 
-- En modo `webhook`, el servidor HTTP integrado escucha en el puerto configurado
-- Restringe el acceso al endpoint del webhook usando reglas de firewall o autenticación vía proxy reverso
+- En modo `webhook`, el servidor HTTP integrado escucha en `127.0.0.1` por defecto
+- Define `WHATSAPP_WEBHOOK_SECRET`: toda petición pasa a exigirlo (header `x-webhook-token` o `?token=`), comparado en tiempo constante
+- Escuchar en cualquier otra dirección (`WHATSAPP_WEBHOOK_HOST`) sin secreto se rechaza al arrancar — de lo contrario, quien alcanzara el puerto podría falsificar mensajes de un número autorizado y aprobar permisos de herramientas
+- Prefiere HTTPS (proxy reverso o túnel) cuando el webhook cruza una red, para que el secreto no viaje en texto plano
 - En modo `n8n`, asegúrate de que tu instancia n8n esté debidamente protegida
 
 ### Prompt Injection

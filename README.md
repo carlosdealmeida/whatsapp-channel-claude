@@ -145,14 +145,19 @@ EVOLUTION_API_INSTANCE=SuaInstancia
 EVOLUTION_API_KEY=sua-api-key
 PROVIDER_MODE=webhook
 WHATSAPP_WEBHOOK_PORT=9801
+WHATSAPP_WEBHOOK_SECRET=um-segredo-longo-e-aleatorio
 ```
 
 ### 2. Configure o webhook da Evolution API
 
-Aponte sua Evolution API para:
+Aponte sua Evolution API para (o segredo vai no `token`):
 ```
-http://seu-servidor:9801/webhook/whatsapp
+http://seu-servidor:9801/webhook/whatsapp?token=um-segredo-longo-e-aleatorio
 ```
+
+> 🔒 Por padrão o servidor escuta só em `127.0.0.1`. Se a Evolution API roda em outra máquina, defina `WHATSAPP_WEBHOOK_HOST=0.0.0.0` — e aí o `WHATSAPP_WEBHOOK_SECRET` é obrigatório: sem ele o channel se recusa a subir. Gere um com `openssl rand -hex 32`.
+>
+> Várias sessões do Claude Code podem usar o mesmo webhook: a primeira sobe o servidor e as outras, ao ver a porta ocupada, passam a consultá-lo. Use `/claude <projeto> ...` para mandar a mensagem para a sessão com `WHATSAPP_PROJECT=<projeto>`.
 
 ### 3. Adicione ao Claude Code e autorize seu número
 
@@ -177,6 +182,8 @@ PROVIDER_URL=https://sua-api.example.com
 | `PROVIDER_MODE` | `n8n` | Modo do provider: `n8n`, `webhook` ou `custom` |
 | `PROVIDER_URL` | `http://localhost:5678/webhook/whatsapp-claude-poll` | URL de polling do provider (modos n8n/custom) |
 | `WHATSAPP_WEBHOOK_PORT` | `9801` | Porta do servidor HTTP (apenas modo webhook) |
+| `WHATSAPP_WEBHOOK_HOST` | `127.0.0.1` | Endereço em que o servidor escuta (apenas modo webhook). Fora do loopback exige `WHATSAPP_WEBHOOK_SECRET` |
+| `WHATSAPP_WEBHOOK_SECRET` | *(vazio)* | Segredo exigido em toda requisição, no header `x-webhook-token` ou no parâmetro `?token=`. Também é enviado no polling |
 | `WHATSAPP_PROJECT` | `default` | Nome do projeto para roteamento de mensagens |
 | `WHATSAPP_POLL_INTERVAL_MS` | `3000` | Intervalo de polling em milissegundos |
 | `GROQ_API_KEY` | *(vazio)* | Chave da API Groq para transcrição de áudio |
